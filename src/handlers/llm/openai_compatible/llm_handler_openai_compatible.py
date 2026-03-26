@@ -1,5 +1,4 @@
 
-
 import os
 import re
 from typing import Dict, Optional, cast
@@ -19,7 +18,7 @@ from handlers.llm.openai_compatible.chat_history_manager import ChatHistory, His
 
 class LLMConfig(HandlerBaseConfigModel, BaseModel):
     model_name: str = Field(default="qwen-plus")
-    system_prompt: str = Field(default="请你扮演一个 AI 助手，用简短的对话来回答用户的问题，并在对话内容中加入合适的标点符号，不需要加入标点符号相关的内容")
+    system_prompt: str = Field(default="请你扮演一个 AI 助手，用简短的两三句话回答用户的问题，并加入合适的标点符号，不要输出思考过程或标签。")
     api_key: str = Field(default=os.getenv("DASHSCOPE_API_KEY"))
     api_url: str = Field(default=None)
     enable_video_input: bool = Field(default=False)
@@ -41,6 +40,7 @@ class LLMContext(HandlerContext):
         self.current_image = None
         self.history = None
         self.enable_video_input = False
+        self.in_think_block = False
 
 
 class HandlerLLM(HandlerBase, ABC):
@@ -92,14 +92,31 @@ class HandlerLLM(HandlerBase, ABC):
         context.enable_video_input = handler_config.enable_video_input
         context.history = ChatHistory(history_length=handler_config.history_length)
         context.client = OpenAI(
-            # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx",
             api_key=context.api_key,
             base_url=context.api_url,
         )
         return context
-    
+
     def start_context(self, session_context, handler_context):
         pass
+
+    def _filter_stream_chunk(self, context: LLMContext, output_text: str) -> str:
+        output_text = output_text.replace('<think>', ' <think> ').replace('</think>', ' </think> ')
+        filtered_parts = []
+        for part in output_text.split():
+            if part == '<think>':
+                context.in_think_block = True
+                continue
+            if part == '</think>':
+                context.in_think_block = False
+                continue
+            if not context.in_think_block:
+                filtered_parts.append(part)
+        if context.in_think_block:
+            return ''
+        filtered = ''.join(filtered_parts)
+        filtered = filtered.replace('<think>', '').replace('</think>', '')
+        return filtered
 
     def handle(self, context: HandlerContext, inputs: ChatData,
                output_definitions: Dict[ChatDataType, HandlerDataInfo]):
@@ -114,7 +131,7 @@ class HandlerLLM(HandlerBase, ABC):
         else:
             return
         speech_id = inputs.data.get_meta("speech_id")
-        if (speech_id is None):
+        if speech_id is None:
             speech_id = context.session_id
 
         if text is not None:
@@ -129,28 +146,32 @@ class HandlerLLM(HandlerBase, ABC):
         if len(chat_text) < 1:
             return
         logger.info(f'llm input {context.model_name} {chat_text} ')
-        current_content = context.history.generate_next_messages(chat_text, 
-                                                                 [context.current_image] if context.current_image is not None else [])
+        current_content = context.history.generate_next_messages(
+            chat_text,
+            [context.current_image] if context.current_image is not None else []
+        )
         logger.debug(f'llm input {context.model_name} {current_content} ')
         try:
             completion = context.client.chat.completions.create(
-                model=context.model_name,  # 此处以qwen-plus为例，可按需更换模型名称。模型列表：https://help.aliyun.com/zh/model-studio/getting-started/models
-                messages=[
-                    context.system_prompt,
-                ] + current_content,
+                model=context.model_name,
+                messages=[context.system_prompt] + current_content,
                 stream=True,
                 stream_options={"include_usage": True}
             )
             context.current_image = None
             context.input_texts = ''
             context.output_texts = ''
+            context.in_think_block = False
             for chunk in completion:
-                if (chunk and chunk.choices and chunk.choices[0] and chunk.choices[0].delta.content):
+                if chunk and chunk.choices and chunk.choices[0] and chunk.choices[0].delta.content:
                     output_text = chunk.choices[0].delta.content
-                    context.output_texts += output_text
-                    logger.info(output_text)
+                    filtered_text = self._filter_stream_chunk(context, output_text)
+                    if not filtered_text:
+                        continue
+                    context.output_texts += filtered_text
+                    logger.info(filtered_text)
                     output = DataBundle(output_definition)
-                    output.set_main_data(output_text)
+                    output.set_main_data(filtered_text)
                     output.add_meta("avatar_text_end", False)
                     output.add_meta("speech_id", speech_id)
                     yield output
@@ -158,18 +179,19 @@ class HandlerLLM(HandlerBase, ABC):
             context.history.add_message(HistoryMessage(role="avatar", content=context.output_texts))
         except Exception as e:
             logger.error(e)
-            if (isinstance(e, APIStatusError)):
+            response = "服务调用失败"
+            if isinstance(e, APIStatusError):
                 response = e.body
                 if isinstance(response, dict) and "message" in response:
                     response = f"{response['message']}"
-            output_text = response 
             output = DataBundle(output_definition)
-            output.set_main_data(output_text)
+            output.set_main_data(str(response))
             output.add_meta("avatar_text_end", False)
             output.add_meta("speech_id", speech_id)
             yield output
         context.input_texts = ''
         context.output_texts = ''
+        context.in_think_block = False
         logger.info('avatar text end')
         end_output = DataBundle(output_definition)
         end_output.set_main_data('')
@@ -179,4 +201,3 @@ class HandlerLLM(HandlerBase, ABC):
 
     def destroy_context(self, context: HandlerContext):
         pass
-

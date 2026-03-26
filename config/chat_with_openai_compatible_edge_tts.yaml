@@ -17,10 +17,10 @@ default:
       SileroVad:
         module: vad/silerovad/vad_handler_silero
         speaking_threshold: 0.5
-        start_delay: 2048
-        end_delay: 5000
-        buffer_look_back: 5000
-        speech_padding: 512
+        start_delay: 1024
+        end_delay: 1200
+        buffer_look_back: 2000
+        speech_padding: 256
       SenseVoice:
         enabled: True
         module: asr/siliconflow/asr_handler_siliconflow
@@ -36,15 +36,22 @@ default:
         access_token: "hEhGD9nEoCmqz2u3mGTPyz8Wr3zZAoZ_"
         sample_rate: 24000
         audio_format: "pcm"
+        chunk_flush_bytes: 8000
       LLMOpenAICompatible:
         enabled: True
         module: llm/openai_compatible/llm_handler_openai_compatible
-        model_name: "Qwen/Qwen2.5-7B-Instruct"
+        # api_url: "https://api.siliconflow.cn/v1"
+        # api_key: "sk-imybictqelemyvvrugxyhzscehwjilvxwhplzxcbzmtmolpp"
+        # model_name: "Qwen/Qwen2.5-7B-Instruct"
+        
+        model_name: "psy"
+        api_url: "http://localhost:8849/v1"
+        api_key: "eeee"
+
         enable_video_input: False
         history_length: 20
         system_prompt: "请你扮演一个 AI 助手，用简短的两三句对话来回答用户的问题，并在对话内容中加入合适的标点符号，不需要讨论标点符号相关的内容"
-        api_url: "https://api.siliconflow.cn/v1"
-        api_key: "sk-imybictqelemyvvrugxyhzscehwjilvxwhplzxcbzmtmolpp"
+        
       LiteAvatar:
         module: avatar/liteavatar/avatar_handler_liteavatar
         avatar_name: 20250408/P19U7JIOAP2aeE6kleXLq7IQ

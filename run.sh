@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-cd /mnt/ai4s/zhouhaojie/zhangxinrui/OpenAvatarChat
+cd /mnt/ai4s/zhouhaojie/zhangxinrui/xinli
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate oac
 source .venv/bin/activate

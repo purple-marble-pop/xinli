@@ -32,7 +32,7 @@ class TTSConfig(HandlerBaseConfigModel, BaseModel):
     api_url: str = Field(default="https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse")
     connect_timeout: float = Field(default=10.0)
     read_timeout: float = Field(default=120.0)
-    chunk_flush_bytes: int = Field(default=24000)
+    chunk_flush_bytes: int = Field(default=8000)
 
 
 class TTSContext(HandlerContext):
@@ -55,7 +55,9 @@ class HandlerTTS(HandlerBase, ABC):
         self.api_url = "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse"
         self.connect_timeout = 10.0
         self.read_timeout = 120.0
-        self.chunk_flush_bytes = 24000
+        self.chunk_flush_bytes = 8000
+        self.sentence_split_pattern = r"(?<=[.!?\u3002\uff01\uff1f])"
+        self.allowed_text_pattern = r"[^a-zA-Z0-9\u4e00-\u9fff,.\~!?\u3002\uff01\uff1f\uff0c\uff1b\uff1a\u3001\s]"
 
     def get_handler_info(self) -> HandlerBaseInfo:
         return HandlerBaseInfo(config_model=TTSConfig)
@@ -92,7 +94,9 @@ class HandlerTTS(HandlerBase, ABC):
         self.chunk_flush_bytes = handler_config.chunk_flush_bytes
 
         if not self.app_id or not self.access_token:
-            raise RuntimeError("Volcengine TTS requires app_id/access_token or VOLCENGINE_TTS_APP_ID/VOLCENGINE_TTS_ACCESS_TOKEN")
+            raise RuntimeError(
+                "Volcengine TTS requires app_id/access_token or VOLCENGINE_TTS_APP_ID/VOLCENGINE_TTS_ACCESS_TOKEN"
+            )
 
     def create_context(self, session_context, handler_config=None):
         context = TTSContext(session_context.session_info.session_id)
@@ -109,8 +113,7 @@ class HandlerTTS(HandlerBase, ABC):
         pass
 
     def filter_text(self, text: str) -> str:
-        pattern = r"[^a-zA-Z0-9\u4e00-\u9fff,.\~!?，。！？；：、]"
-        return re.sub(pattern, "", text)
+        return re.sub(self.allowed_text_pattern, "", text)
 
     def _submit_audio_chunk(self, context: TTSContext, output_definition, speech_id, pcm_bytes: bytes):
         if not pcm_bytes:
@@ -126,10 +129,9 @@ class HandlerTTS(HandlerBase, ABC):
         context.submit_data(output)
 
     def _stream_tts(self, context: TTSContext, output_definition, speech_id, text: str):
+        request_started_at = time.perf_counter()
         payload = {
-            "user": {
-                "uid": str(speech_id),
-            },
+            "user": {"uid": str(speech_id)},
             "req_params": {
                 "text": text,
                 "speaker": self.voice,
@@ -150,6 +152,9 @@ class HandlerTTS(HandlerBase, ABC):
         req = request.Request(self.api_url, data=body, headers=headers, method="POST")
         timeout = self.connect_timeout + self.read_timeout
         audio_buffer = bytearray()
+        first_audio_packet_at = None
+        first_submit_at = None
+        total_audio_bytes = 0
 
         with request.urlopen(req, timeout=timeout) as response:
             for raw_line in response:
@@ -162,13 +167,45 @@ class HandlerTTS(HandlerBase, ABC):
                     raise RuntimeError(f"Volcengine TTS failed: {payload}")
                 data = payload.get("data")
                 if data:
-                    audio_buffer.extend(base64.b64decode(data))
+                    decoded_audio = base64.b64decode(data)
+                    if first_audio_packet_at is None:
+                        first_audio_packet_at = time.perf_counter()
+                        logger.info(
+                            "volcengine tts first audio packet in {:.3f}s for text: {}",
+                            first_audio_packet_at - request_started_at,
+                            text,
+                        )
+                    total_audio_bytes += len(decoded_audio)
+                    audio_buffer.extend(decoded_audio)
                     if len(audio_buffer) >= self.chunk_flush_bytes:
+                        if first_submit_at is None:
+                            first_submit_at = time.perf_counter()
+                            logger.info(
+                                "volcengine tts first submit in {:.3f}s, buffered {} bytes for text: {}",
+                                first_submit_at - request_started_at,
+                                len(audio_buffer),
+                                text,
+                            )
                         self._submit_audio_chunk(context, output_definition, speech_id, bytes(audio_buffer))
                         audio_buffer.clear()
 
         if len(audio_buffer) > 0:
+            if first_submit_at is None:
+                first_submit_at = time.perf_counter()
+                logger.info(
+                    "volcengine tts first submit in {:.3f}s, buffered {} bytes for text: {}",
+                    first_submit_at - request_started_at,
+                    len(audio_buffer),
+                    text,
+                )
             self._submit_audio_chunk(context, output_definition, speech_id, bytes(audio_buffer))
+
+        logger.info(
+            "volcengine tts completed in {:.3f}s, total_audio_bytes={}, text={}",
+            time.perf_counter() - request_started_at,
+            total_audio_bytes,
+            text,
+        )
 
     def _emit_speech_end(self, context: TTSContext, output_definition, speech_id):
         output = DataBundle(output_definition)
@@ -191,23 +228,27 @@ class HandlerTTS(HandlerBase, ABC):
 
         if text is not None:
             text = re.sub(r"<\|.*?\|>", "", text)
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+            text = text.replace("<think>", "").replace("</think>", "")
             context.input_text += self.filter_text(text)
 
         text_end = inputs.data.get_meta("avatar_text_end", False)
         try:
             if not text_end:
-                sentences = re.split(r"(?<=[,.\~!?，。！？；：、])", context.input_text)
+                sentences = re.split(self.sentence_split_pattern, context.input_text)
                 if len(sentences) > 1:
                     complete_sentences = sentences[:-1]
                     context.input_text = sentences[-1]
                     for sentence in complete_sentences:
                         sentence = sentence.strip()
-                        if not sentence:
+                        if len(sentence) < 2:
                             continue
+                        logger.info("volcengine tts sentence chunk: {}", sentence)
                         self._stream_tts(context, output_definition, speech_id, sentence)
             else:
                 final_text = context.input_text.strip()
                 if final_text:
+                    logger.info("volcengine tts final chunk: {}", final_text)
                     self._stream_tts(context, output_definition, speech_id, final_text)
                 context.input_text = ""
                 self._emit_speech_end(context, output_definition, speech_id)
