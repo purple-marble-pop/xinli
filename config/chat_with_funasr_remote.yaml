@@ -40,6 +40,7 @@ default:
         ref_audio_text: "希望你以后能够做的比我还好哟"
         spk_id: "zero_shot"
         sample_rate: 24000
+        streaming_mode: True
       LLMOpenAICompatible:
         enabled: True
         module: llm/openai_compatible/llm_handler_openai_compatible
@@ -55,5 +56,5 @@ default:
         avatar_name: 20250408/P19U7JIOAP2aeE6kleXLq7IQ
         fps: 25
         debug: false
-        enable_fast_mode: false
+        enable_fast_mode: true
         use_gpu: true

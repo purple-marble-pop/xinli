@@ -5,6 +5,7 @@ import ssl
 from typing import Dict, Optional, cast
 from loguru import logger
 import numpy as np
+import librosa
 from pydantic import BaseModel, Field
 from abc import ABC
 import os
@@ -233,10 +234,9 @@ class HandlerASR(HandlerBase, ABC):
             audio = audio.squeeze()
             # Resample to 16000 if needed (xinli uses 24000, funasr expects 16000)
             if hasattr(audio, 'shape') and audio.shape[0] > 0:
-                # Simple resampling by decimation if sample rate differs
+                # Correct resampling with librosa
                 if 24000 == 24000:  # Our input is 24000, need 16000
-                    # Simple 3->2 decimation
-                    audio_resampled = audio[::3][::2]
+                    audio_resampled = librosa.resample(audio, orig_sr=24000, target_sr=16000)
                 else:
                     audio_resampled = audio
                 logger.info('audio in')

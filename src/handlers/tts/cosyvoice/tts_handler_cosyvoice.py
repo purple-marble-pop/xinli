@@ -116,7 +116,7 @@ class HandlerTTS(HandlerBase, ABC):
 
     def load(self, engine_config: ChatEngineConfigModel, handler_config: Optional[BaseModel] = None):
         if isinstance(handler_config, TTSConfig):  
-            if not os.path.isabs(handler_config.model_name) and handler_config.model_name is not None:
+            if handler_config.model_name is not None and not os.path.isabs(handler_config.model_name):
                 modelscope.snapshot_download(handler_config.model_name)
 
             self.sample_rate = handler_config.sample_rate      

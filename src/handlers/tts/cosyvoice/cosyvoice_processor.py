@@ -95,6 +95,15 @@ class TTSCosyVoiceProcessor(spawn_context.Process):
                     logger.debug('tts test')
         elif self.api_key is not None:
             raise TypeError('api_key not support yet')
+        # For remote API (model is None but api_url set), we are ready immediately
+        if self.model is None and self.api_url is not None:
+            logger.info('remote TTS processor ready')
+            # Send an empty response to signal ready to main process
+            self.output_queue.put({
+                'key': '',
+                'tts_speech': np.zeros((1, 0)),
+                'session_id': ''
+            })
         logger.info('tts processor started')
         while True:
             try:
