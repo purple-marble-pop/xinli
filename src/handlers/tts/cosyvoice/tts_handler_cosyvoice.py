@@ -34,6 +34,13 @@ class TTSConfig(HandlerBaseConfigModel, BaseModel):
     spk_id: str = Field(default=None)
     sample_rate: int = Field(default=24000)
     process_num: int = Field(default=1)
+    # Extra parameters for remote zero-shot API
+    text_lang: str = Field(default="zh")
+    prompt_lang: str = Field(default="zh")
+    text_split_method: str = Field(default="cut5")
+    batch_size: int = Field(default=20)
+    media_type: str = Field(default="wav")
+    streaming_mode: bool = Field(default=True)
 
 
 @dataclass

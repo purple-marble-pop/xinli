@@ -38,6 +38,13 @@ class TTSCosyVoiceProcessor(spawn_context.Process):
         self.ref_audio_buffer = None
         self.sample_rate = config.sample_rate
         self.api_key = config.api_key
+        # Extra parameters for remote API
+        self.text_lang = getattr(config, 'text_lang', 'zh')
+        self.prompt_lang = getattr(config, 'prompt_lang', 'zh')
+        self.text_split_method = getattr(config, 'text_split_method', 'cut5')
+        self.batch_size = getattr(config, 'batch_size', 20)
+        self.media_type = getattr(config, 'media_type', 'wav')
+        self.streaming_mode = getattr(config, 'streaming_mode', True)
 
         self.input_queue = input_queue
         self.output_queue = output_queue
@@ -104,10 +111,18 @@ class TTSCosyVoiceProcessor(spawn_context.Process):
                 logger.info('ignore empty input_text')
             elif self.model is None and self.api_url is not None:
                 # if you start cosyvoice tts server through CosyVoice/runtime/python/fastapi/server.py
-                response = requests.get(self.api_url, data={
-                    'tts_text': input_text,
-                    'spk_id': self.spk_id
-                }, stream=True)
+                params = {
+                    'text': input_text,
+                    'text_lang': self.text_lang,
+                    'ref_audio_path': self.ref_audio_path,
+                    'prompt_lang': self.prompt_lang,
+                    'prompt_text': self.ref_audio_text,
+                    'text_split_method': self.text_split_method,
+                    'batch_size': self.batch_size,
+                    'media_type': self.media_type,
+                    'streaming_mode': self.streaming_mode,
+                }
+                response = requests.get(self.api_url, params=params, stream=True)
                 if response.status_code != 200:
                     logger.info(f"Request failed with status code {response.status_code}")
                     continue

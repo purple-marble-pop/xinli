@@ -1,0 +1,59 @@
+default:
+  logger:
+    log_level: "INFO"
+  service:
+    host: "0.0.0.0"
+    port: 8282
+    cert_file: "ssl_certs/localhost.crt"
+    cert_key: "ssl_certs/localhost.key"
+  chat_engine:
+    model_root: "models"
+    concurrent_limit: 1
+    handler_search_path:
+      - "src/handlers"
+    handler_configs:
+      RtcClient:
+        module: client/rtc_client/client_handler_rtc
+      SileroVad:
+        module: vad/silerovad/vad_handler_silero
+        speaking_threshold: 0.5
+        start_delay: 1024
+        end_delay: 1200
+        buffer_look_back: 2000
+        speech_padding: 256
+      FunasrRemoteASR:
+        enabled: True
+        module: asr/funasr_remote/asr_handler_funasr_remote
+        host: "localhost"
+        port: 10096
+        mode: "2pass"
+        chunk_size: "5, 10, 5"
+        chunk_interval: 10
+        use_ssl: False
+        use_itn: True
+        hotwords: ""
+      CosyVoiceRemote:
+        enabled: True
+        module: tts/cosyvoice/tts_handler_cosyvoice
+        api_url: "http://172.18.144.22:46775/tts"
+        ref_audio_path: "zero_shot_prompt.wav"
+        ref_audio_text: "希望你以后能够做的比我还好哟"
+        spk_id: "zero_shot"
+        sample_rate: 24000
+      LLMOpenAICompatible:
+        enabled: True
+        module: llm/openai_compatible/llm_handler_openai_compatible
+        # 请修改为你的LLM配置
+        model_name: "Qwen/Qwen2.5-7B-Instruct"
+        api_url: "http://localhost:8849/v1"
+        api_key: "sk-imybictqelemyvvrugxyhzscehwjilvxwhplzxcbzmtmolpp"
+        enable_video_input: False
+        history_length: 20
+        system_prompt: "请你扮演一个 AI 助手，用简短的两三句对话来回答用户的问题，并在对话内容中加入合适的标点符号，不需要讨论标点符号相关的内容"
+      LiteAvatar:
+        module: avatar/liteavatar/avatar_handler_liteavatar
+        avatar_name: 20250408/P19U7JIOAP2aeE6kleXLq7IQ
+        fps: 25
+        debug: false
+        enable_fast_mode: false
+        use_gpu: true
